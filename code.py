@@ -55,3 +55,23 @@ df["beta"] = df["cov"] / df["var_mkt"]
 
 # Optional: drop beta for SP500 itself
 df.loc[df["stockname"] == "SP500", "beta"] = None
+
+
+
+window = 30
+
+# Compute covariance grouped by stockname
+cov = df.groupby("stockname")["return"].rolling(window).cov(df["mkt_return"])
+
+# Remove the group index and align with df
+df["cov"] = cov.reset_index(level=0, drop=True)
+
+# Market variance (same for all stocks, so no groupby needed)
+df["var_mkt"] = df["mkt_return"].rolling(window).var()
+
+# Beta
+df["beta"] = df["cov"] / df["var_mkt"]
+
+# Drop beta for SP500 itself
+df.loc[df["stockname"] == "SP500", "beta"] = None
+
