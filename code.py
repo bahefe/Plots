@@ -74,4 +74,45 @@ df["beta"] = df["cov"] / df["var_mkt"]
 
 # Drop beta for SP500 itself
 df.loc[df["stockname"] == "SP500", "beta"] = None
+import pandas as pd
+
+# Ensure proper datatypes
+df['date'] = pd.to_datetime(df['date'])
+df['time'] = pd.to_datetime(df['time']).dt.time
+
+# Helper to get last close of previous day
+df = df.sort_values(['sym', 'date', 'time'])
+df['prev_close'] = df.groupby('sym')['price'].shift(1)
+df['prev_date'] = df.groupby('sym')['date'].shift(1)
+
+# Only keep prev_close from the last row of previous day
+df['prev_close'] = df.groupby(['sym', 'date'])['prev_close'].transform('first')
+
+# Pivot to make it easier to reference times
+pivoted = df.pivot_table(index=['date', 'sym'], 
+                         columns='time', 
+                         values='price')
+
+# Extract relevant times
+o   = pivoted[ pd.to_datetime("09:30").time() ]
+o30 = pivoted[ pd.to_datetime("10:00").time() ]
+c60 = pivoted[ pd.to_datetime("15:00").time() ]
+c30 = pivoted[ pd.to_datetime("15:30").time() ]
+c   = pivoted[ pd.to_datetime("16:00").time() ]
+pc  = df.groupby(['date','sym'])['prev_close'].first()
+
+# Compute returns
+res = pd.DataFrame(index=pivoted.index)
+res['ON']    = o / pc - 1
+res['FH']    = o30 / o - 1
+res['M']     = c60 / o30 - 1
+res['SLH']   = c30 / c60 - 1
+res['LH']    = c / c30 - 1
+res['ONFH']  = o30 / pc - 1
+res['ROD3']  = c60 / pc - 1
+
+# Merge back with your daily data (returns, beta etc.)
+final = df.drop_duplicates(['date','sym']) \
+          .set_index(['date','sym']) \
+          .join(res)
 
