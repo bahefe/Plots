@@ -145,3 +145,37 @@ prices_wide["SLH"] = np.log(prices_wide["15:30"] / prices_wide["15:00"])
 prices_wide["LH"] = np.log(prices_wide["16:00"] / prices_wide["15:30"])
 returns = prices_wide[["sym", "date", "ROD3", "ROD4", "SLH", "LH"]]
 
+
+# Pivot intraday
+prices_wide = intraday.pivot_table(
+    index=["sym", "date"], 
+    columns="time", 
+    values="price"
+).reset_index()
+
+# Flatten column names
+prices_wide.columns.name = None
+
+# Inspect column names (likely '16:30:00')
+print(prices_wide.columns)
+
+# Use the exact string that appears in your columns
+col_1630 = "16:30:00"
+col_1500 = "15:00:00"
+col_1530 = "15:30:00"
+col_1600 = "16:00:00"
+
+# Shift previous day's 16:30 per symbol
+prices_wide["prev_1630"] = prices_wide.groupby("sym")[col_1630].shift(1)
+
+# Compute returns
+import numpy as np
+
+prices_wide["ROD3"] = np.log(prices_wide[col_1500] / prices_wide["prev_1630"])
+prices_wide["ROD4"] = np.log(prices_wide[col_1530] / prices_wide["prev_1630"])
+prices_wide["SLH"]  = np.log(prices_wide[col_1530] / prices_wide[col_1500])
+prices_wide["LH"]   = np.log(prices_wide[col_1600] / prices_wide[col_1530])
+
+# Final dataset
+returns = prices_wide[["sym", "date", "ROD3", "ROD4", "SLH", "LH"]]
+
