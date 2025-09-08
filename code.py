@@ -116,3 +116,32 @@ final = df.drop_duplicates(['date','sym']) \
           .set_index(['date','sym']) \
           .join(res)
 
+
+
+# Pivot so each time is a column
+prices_wide = intraday.pivot_table(
+    index=["sym", "date"], 
+    columns="time", 
+    values="price"
+).reset_index()
+
+# Make sure columns are easy to access
+prices_wide.columns.name = None
+
+
+prices_wide["prev_1630"] = prices_wide.groupby("sym")["16:30"].shift(1)
+import numpy as np
+
+# ROD3: prev 16:30 → today 15:00
+prices_wide["ROD3"] = np.log(prices_wide["15:00"] / prices_wide["prev_1630"])
+
+# ROD4: prev 16:30 → today 15:30
+prices_wide["ROD4"] = np.log(prices_wide["15:30"] / prices_wide["prev_1630"])
+
+# SLH: 15:00 → 15:30
+prices_wide["SLH"] = np.log(prices_wide["15:30"] / prices_wide["15:00"])
+
+# LH: 15:30 → 16:00
+prices_wide["LH"] = np.log(prices_wide["16:00"] / prices_wide["15:30"])
+returns = prices_wide[["sym", "date", "ROD3", "ROD4", "SLH", "LH"]]
+
