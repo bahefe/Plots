@@ -178,4 +178,25 @@ prices_wide["LH"]   = np.log(prices_wide[col_1600] / prices_wide[col_1530])
 
 # Final dataset
 returns = prices_wide[["sym", "date", "ROD3", "ROD4", "SLH", "LH"]]
+import pandas as pd
+import numpy as np
+
+# make sure datetime is sorted
+df["datetime"] = pd.to_datetime(df["date"].astype(str) + " " + df["time"].astype(str))
+df = df.sort_values(["sym", "date", "datetime"])
+
+# compute log returns within each sym+date
+df["log_ret"] = df.groupby(["sym", "date"])["price"].apply(lambda x: np.log(x / x.shift(1)))
+
+# drop the first NA of each day
+df = df.dropna(subset=["log_ret"])
+
+# realized volatility = sum of squared log returns per sym+date
+rv = (
+    df.groupby(["sym", "date"])["log_ret"]
+      .apply(lambda x: (x**2).sum())
+      .reset_index(name="realized_vol")
+)
+
+print(rv.head())
 
