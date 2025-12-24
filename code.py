@@ -192,6 +192,43 @@ def run_coin_bayes_game(p_true=None, seed=None):
         "cumulative_tails": cumulative_tails,
     }
 
+def plot_distribution(points: np.ndarray, title: str):
+    centers = (EDGES[:-1] + EDGES[1:]) / 2
+    plt.figure(figsize=(10, 4))
+    plt.bar(centers, points, width=BUCKET_WIDTH * 0.95)
+    plt.xticks(EDGES, rotation=90)
+    plt.xlabel("Coin head probability bucket")
+    plt.ylabel("Points")
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()  # stays in notebook output
+
+def final_plot(all_distributions, p_true: float):
+    centers = (EDGES[:-1] + EDGES[1:]) / 2
+    plt.figure(figsize=(10, 4))
+
+    # all guesses in red
+    for pts in all_distributions:
+        plt.plot(
+            centers,
+            pts,
+            marker="o",
+            linewidth=1,
+            alpha=0.6,
+            color="red"
+        )
+
+    # true probability in green
+    plt.axvline(p_true, linewidth=3, color="green", label="True p")
+
+    plt.xticks(EDGES, rotation=90)
+    plt.xlabel("Coin head probability bucket")
+    plt.ylabel("Points")
+    plt.title("All guesses (red) vs true p (green)")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()  # stays visible
+%matplotlib inline
 
 # Example run:
 # results = run_coin_bayes_game(seed=42)
