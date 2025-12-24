@@ -1,202 +1,198 @@
-import pandas as pd
-import statsmodels.api as sm
-
-# Example: df has columns ["date", "spy", "AAPL", "MSFT", "GOOG", ...]
-# Set index to date if not already
-df = df.set_index("date")
-
-# Compute returns (log or simple, here simple % change)
-returns = df.pct_change().dropna()
-
-# Function to compute rolling beta of one stock vs SPY
-def rolling_beta(stock_returns, market_returns, window=52):
-    betas = []
-    for i in range(window, len(stock_returns)+1):
-        y = stock_returns.iloc[i-window:i]
-        x = market_returns.iloc[i-window:i]
-        x = sm.add_constant(x)  # add intercept
-        model = sm.OLS(y, x).fit()
-        betas.append(model.params[1])  # slope = beta
-    # Align result to original index
-    beta_series = pd.Series([None]*(window-1) + betas, index=stock_returns.index)
-    return beta_series
-
-# Apply to each stock (excluding "spy")
-betas_df = pd.DataFrame(index=returns.index)
-
-for stock in returns.columns:
-    if stock != "spy":
-        betas_df[stock] = rolling_beta(returns[stock], returns["spy"], window=52)
-
-
-import pandas as pd
-
-# Example: df has columns [date, stockname, price]
-# Ensure it's sorted
-df = df.sort_values(["stockname", "date"]).copy()
-
-# Returns
-df["return"] = df.groupby("stockname")["price"].pct_change()
-
-# Extract market (SP500) returns
-mkt = (
-    df.loc[df["stockname"] == "SP500", ["date", "return"]]
-    .rename(columns={"return": "mkt_return"})
-)
-
-# Merge market returns back into df
-df = df.merge(mkt, on="date", how="left")
-
-# Rolling beta using cov/var
-window = 30
-df["cov"] = df.groupby("stockname")["return"].rolling(window).cov(df["mkt_return"]).reset_index(level=0, drop=True)
-df["var_mkt"] = df["mkt_return"].rolling(window).var()
-df["beta"] = df["cov"] / df["var_mkt"]
-
-# Optional: drop beta for SP500 itself
-df.loc[df["stockname"] == "SP500", "beta"] = None
-
-
-
-window = 30
-
-# Compute covariance grouped by stockname
-cov = df.groupby("stockname")["return"].rolling(window).cov(df["mkt_return"])
-
-# Remove the group index and align with df
-df["cov"] = cov.reset_index(level=0, drop=True)
-
-# Market variance (same for all stocks, so no groupby needed)
-df["var_mkt"] = df["mkt_return"].rolling(window).var()
-
-# Beta
-df["beta"] = df["cov"] / df["var_mkt"]
-
-# Drop beta for SP500 itself
-df.loc[df["stockname"] == "SP500", "beta"] = None
-import pandas as pd
-
-# Ensure proper datatypes
-df['date'] = pd.to_datetime(df['date'])
-df['time'] = pd.to_datetime(df['time']).dt.time
-
-# Helper to get last close of previous day
-df = df.sort_values(['sym', 'date', 'time'])
-df['prev_close'] = df.groupby('sym')['price'].shift(1)
-df['prev_date'] = df.groupby('sym')['date'].shift(1)
-
-# Only keep prev_close from the last row of previous day
-df['prev_close'] = df.groupby(['sym', 'date'])['prev_close'].transform('first')
-
-# Pivot to make it easier to reference times
-pivoted = df.pivot_table(index=['date', 'sym'], 
-                         columns='time', 
-                         values='price')
-
-# Extract relevant times
-o   = pivoted[ pd.to_datetime("09:30").time() ]
-o30 = pivoted[ pd.to_datetime("10:00").time() ]
-c60 = pivoted[ pd.to_datetime("15:00").time() ]
-c30 = pivoted[ pd.to_datetime("15:30").time() ]
-c   = pivoted[ pd.to_datetime("16:00").time() ]
-pc  = df.groupby(['date','sym'])['prev_close'].first()
-
-# Compute returns
-res = pd.DataFrame(index=pivoted.index)
-res['ON']    = o / pc - 1
-res['FH']    = o30 / o - 1
-res['M']     = c60 / o30 - 1
-res['SLH']   = c30 / c60 - 1
-res['LH']    = c / c30 - 1
-res['ONFH']  = o30 / pc - 1
-res['ROD3']  = c60 / pc - 1
-
-# Merge back with your daily data (returns, beta etc.)
-final = df.drop_duplicates(['date','sym']) \
-          .set_index(['date','sym']) \
-          .join(res)
-
-
-
-# Pivot so each time is a column
-prices_wide = intraday.pivot_table(
-    index=["sym", "date"], 
-    columns="time", 
-    values="price"
-).reset_index()
-
-# Make sure columns are easy to access
-prices_wide.columns.name = None
-
-
-prices_wide["prev_1630"] = prices_wide.groupby("sym")["16:30"].shift(1)
 import numpy as np
+import matplotlib.pyplot as plt
 
-# ROD3: prev 16:30 → today 15:00
-prices_wide["ROD3"] = np.log(prices_wide["15:00"] / prices_wide["prev_1630"])
-
-# ROD4: prev 16:30 → today 15:30
-prices_wide["ROD4"] = np.log(prices_wide["15:30"] / prices_wide["prev_1630"])
-
-# SLH: 15:00 → 15:30
-prices_wide["SLH"] = np.log(prices_wide["15:30"] / prices_wide["15:00"])
-
-# LH: 15:30 → 16:00
-prices_wide["LH"] = np.log(prices_wide["16:00"] / prices_wide["15:30"])
-returns = prices_wide[["sym", "date", "ROD3", "ROD4", "SLH", "LH"]]
+# -----------------------------
+# Configuration
+# -----------------------------
+BUCKET_WIDTH = 0.05
+EDGES = np.arange(0.0, 1.0 + BUCKET_WIDTH, BUCKET_WIDTH)  # 0.00 ... 1.00
+N_BUCKETS = len(EDGES) - 1  # 20
+ROUNDS = 5
+TOSSES_PER_ROUND = 5
+POINTS_TOTAL = 100
 
 
-# Pivot intraday
-prices_wide = intraday.pivot_table(
-    index=["sym", "date"], 
-    columns="time", 
-    values="price"
-).reset_index()
+def bucket_labels():
+    labels = []
+    for i in range(N_BUCKETS):
+        lo = EDGES[i]
+        hi = EDGES[i + 1]
+        # last bucket inclusive at 1.00
+        if i == N_BUCKETS - 1:
+            labels.append(f"{lo:.2f}-{hi:.2f}")
+        else:
+            labels.append(f"{lo:.2f}-{hi:.2f}")
+    return labels
 
-# Flatten column names
-prices_wide.columns.name = None
 
-# Inspect column names (likely '16:30:00')
-print(prices_wide.columns)
+def bucket_index_for_p(p: float) -> int:
+    """
+    Returns bucket index for p in [0,1].
+    Buckets are [0.00,0.05), [0.05,0.10), ..., [0.95,1.00] (last inclusive).
+    """
+    if p >= 1.0:
+        return N_BUCKETS - 1
+    if p <= 0.0:
+        return 0
+    idx = int(p // BUCKET_WIDTH)
+    return min(max(idx, 0), N_BUCKETS - 1)
 
-# Use the exact string that appears in your columns
-col_1630 = "16:30:00"
-col_1500 = "15:00:00"
-col_1530 = "15:30:00"
-col_1600 = "16:00:00"
 
-# Shift previous day's 16:30 per symbol
-prices_wide["prev_1630"] = prices_wide.groupby("sym")[col_1630].shift(1)
+def parse_points_input(raw: str) -> np.ndarray:
+    """
+    Accepts either:
+      - 20 integers separated by commas/spaces
+      - OR a compact form like: "0:10,1:5,2:0,..."
+    but simplest is 20 numbers.
+    """
+    raw = raw.strip()
+    if ":" in raw:
+        # sparse format: "idx:points, idx:points, ..."
+        pts = np.zeros(N_BUCKETS, dtype=int)
+        chunks = [c.strip() for c in raw.split(",") if c.strip()]
+        for ch in chunks:
+            idx_str, val_str = ch.split(":")
+            idx = int(idx_str.strip())
+            val = int(val_str.strip())
+            if not (0 <= idx < N_BUCKETS):
+                raise ValueError(f"Bucket index {idx} out of range 0..{N_BUCKETS-1}")
+            pts[idx] = val
+        return pts
 
-# Compute returns
-import numpy as np
+    # dense format: 20 numbers
+    parts = raw.replace(",", " ").split()
+    if len(parts) != N_BUCKETS:
+        raise ValueError(f"Expected {N_BUCKETS} numbers, got {len(parts)}.")
+    pts = np.array([int(x) for x in parts], dtype=int)
+    return pts
 
-prices_wide["ROD3"] = np.log(prices_wide[col_1500] / prices_wide["prev_1630"])
-prices_wide["ROD4"] = np.log(prices_wide[col_1530] / prices_wide["prev_1630"])
-prices_wide["SLH"]  = np.log(prices_wide[col_1530] / prices_wide[col_1500])
-prices_wide["LH"]   = np.log(prices_wide[col_1600] / prices_wide[col_1530])
 
-# Final dataset
-returns = prices_wide[["sym", "date", "ROD3", "ROD4", "SLH", "LH"]]
-import pandas as pd
-import numpy as np
+def prompt_for_distribution(round_name: str) -> np.ndarray:
+    labels = bucket_labels()
+    print("\nAllocate 100 points across these 20 probability buckets (sum must be 100):")
+    print("Buckets (index: range):")
+    for i, lab in enumerate(labels):
+        print(f"  {i:2d}: {lab}")
 
-# make sure datetime is sorted
-df["datetime"] = pd.to_datetime(df["date"].astype(str) + " " + df["time"].astype(str))
-df = df.sort_values(["sym", "date", "datetime"])
+    print("\nInput format options:")
+    print("  A) 20 integers (recommended), e.g.:")
+    print("     0 0 0 0 5 10 15 20 20 15 10 5 0 0 0 0 0 0 0 0")
+    print("  B) Comma-separated also works.")
+    print("  C) Sparse format: idx:points,idx:points,... (unspecified buckets assumed 0)\n")
 
-# compute log returns within each sym+date
-df["log_ret"] = df.groupby(["sym", "date"])["price"].apply(lambda x: np.log(x / x.shift(1)))
+    while True:
+        raw = input(f"{round_name} - enter your {POINTS_TOTAL} points: ")
+        try:
+            pts = parse_points_input(raw)
+            if np.any(pts < 0):
+                raise ValueError("Points cannot be negative.")
+            s = int(pts.sum())
+            if s != POINTS_TOTAL:
+                raise ValueError(f"Points must sum to {POINTS_TOTAL}; got {s}.")
+            return pts
+        except Exception as e:
+            print(f"Invalid input: {e}\nPlease try again.\n")
 
-# drop the first NA of each day
-df = df.dropna(subset=["log_ret"])
 
-# realized volatility = sum of squared log returns per sym+date
-rv = (
-    df.groupby(["sym", "date"])["log_ret"]
-      .apply(lambda x: (x**2).sum())
-      .reset_index(name="realized_vol")
-)
+def plot_distribution(points: np.ndarray, title: str):
+    centers = (EDGES[:-1] + EDGES[1:]) / 2
+    plt.figure(figsize=(10, 4))
+    plt.bar(centers, points, width=BUCKET_WIDTH * 0.95)
+    plt.xticks(EDGES, rotation=90)
+    plt.xlabel("Coin head probability bucket")
+    plt.ylabel("Points")
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()
 
-print(rv.head())
 
+def final_plot(all_distributions, p_true: float):
+    centers = (EDGES[:-1] + EDGES[1:]) / 2
+    plt.figure(figsize=(10, 4))
+
+    # plot each distribution in red (semi-transparent)
+    for k, pts in enumerate(all_distributions, start=1):
+        plt.plot(centers, pts, marker="o", linewidth=1, alpha=0.6)  # default color is fine, but request says red
+    # enforce red explicitly for "all the others are red"
+    # (Matplotlib defaults vary; we set them to red to match your spec.)
+    plt.clf()
+    plt.figure(figsize=(10, 4))
+    for pts in all_distributions:
+        plt.plot(centers, pts, marker="o", linewidth=1, alpha=0.6, color="red")
+
+    # true probability in green
+    plt.axvline(p_true, linewidth=2, color="green")
+
+    plt.xticks(EDGES, rotation=90)
+    plt.xlabel("Coin head probability bucket")
+    plt.ylabel("Points")
+    plt.title("All guesses (red) vs true p (green)")
+    plt.tight_layout()
+    plt.show()
+
+
+def run_coin_bayes_game(p_true=None, seed=None):
+    rng = np.random.default_rng(seed)
+
+    # choose true p if not provided
+    if p_true is None:
+        # keep away from exact 0/1 to avoid triviality
+        p_true = float(rng.uniform(0.05, 0.95))
+
+    print("Coin Toss Belief Game")
+    print("---------------------")
+    print(f"(Hidden) True head probability has been set.\n")
+
+    cumulative_heads = 0
+    cumulative_tails = 0
+
+    distributions = []
+
+    for r in range(1, ROUNDS + 1):
+        # simulate 5 tosses
+        tosses = rng.random(TOSSES_PER_ROUND) < p_true
+        heads = int(tosses.sum())
+        tails = TOSSES_PER_ROUND - heads
+
+        cumulative_heads += heads
+        cumulative_tails += tails
+
+        print(f"\nRound {r} results (5 tosses): Heads={heads}, Tails={tails}")
+        print(f"Cumulative after {r*TOSSES_PER_ROUND} tosses: Heads={cumulative_heads}, Tails={cumulative_tails}")
+
+        pts = prompt_for_distribution(round_name=f"Round {r}")
+        distributions.append(pts)
+        plot_distribution(pts, title=f"Your distribution after round {r} ({r*TOSSES_PER_ROUND} tosses)")
+
+    # final guess after 25 tosses
+    final_pts = prompt_for_distribution(round_name="FINAL GUESS (after 25 tosses)")
+    distributions.append(final_pts)
+    plot_distribution(final_pts, title="Your FINAL distribution (used for payout)")
+
+    # payout
+    true_bucket = bucket_index_for_p(p_true)
+    points_in_true_bucket = int(final_pts[true_bucket])
+    money_won = points_in_true_bucket * 5
+
+    # reveal truth + final plot
+    print("\n--- REVEAL ---")
+    print(f"True p(heads) = {p_true:.4f}")
+    print(f"True bucket index = {true_bucket}  (range {EDGES[true_bucket]:.2f}-{EDGES[true_bucket+1]:.2f})")
+    print(f"Points you placed in the true bucket (FINAL) = {points_in_true_bucket}")
+    print(f"Money won = {points_in_true_bucket} x 5 = {money_won}")
+
+    final_plot(distributions, p_true=p_true)
+
+    return {
+        "p_true": p_true,
+        "true_bucket": true_bucket,
+        "money_won": money_won,
+        "distributions": distributions,
+        "cumulative_heads": cumulative_heads,
+        "cumulative_tails": cumulative_tails,
+    }
+
+
+# Example run:
+# results = run_coin_bayes_game(seed=42)
+# print(results["money_won"])
